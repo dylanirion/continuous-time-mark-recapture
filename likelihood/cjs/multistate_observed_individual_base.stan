@@ -15,7 +15,7 @@ real observed_individual_lpdf(array[] real capture_times,
         return negative_infinity();
       continue;
     }
-    matrix[rows(Q_mod), rows(Q_mod)] P_trans = matrix_exp(Q_mod * dt);
+    matrix[rows(Q_mod), cols(Q_mod)] P_trans = matrix_exp(Q_mod * dt);
     if (P_trans[s_prev, s_curr] < 1e-30) 
       return negative_infinity();
     log_prob += log(P_trans[s_prev, s_curr]) + log(lambda[s_curr]);
@@ -24,7 +24,7 @@ real observed_individual_lpdf(array[] real capture_times,
   // No captures after last event
   real t_last = capture_times[n_captures];
   if (T_end - t_last > 1e-9) {
-    matrix[rows(Q_mod), rows(Q_mod)] P_final = matrix_exp(
+    matrix[rows(Q_mod), cols(Q_mod)] P_final = matrix_exp(
                                                           Q_mod
                                                           * (T_end - t_last));
     real prob_no_detection = sum(P_final[capture_states[n_captures],  : ]);

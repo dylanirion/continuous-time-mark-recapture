@@ -169,7 +169,7 @@ transformed parameters {
       }
       
       // diagonal: negative sum of row (including detection)
-      real row_sum = sum(Q_mod[r,  : ]) - Q_mod[r, r];
+      real row_sum = sum(Q_mod[r,  : ]);
       Q_mod[r, r] = -row_sum - lambda[r];
     }
   }
