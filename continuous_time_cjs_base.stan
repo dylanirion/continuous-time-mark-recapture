@@ -82,24 +82,24 @@ transformed data {
   int n_effective_states = n_states - sum(is_absorbing);
 }
 parameters {
-  vector[n_states] log_exit_rate_raw;
+  vector[n_effective_states] log_exit_rate_raw;
   vector[sum(n_free_per_state) - n_effective_states] free_logits;
 }
 transformed parameters {
-  vector[n_states] log_exit_rate = rep_vector(0.0, n_states);
+  vector[n_effective_states] log_exit_rate = rep_vector(0.0, n_effective_states);
   vector<lower=0>[n_states] exit_rate = rep_vector(0.0, n_states);
   
   // fill in exit rates only for non-absorbing states
   {
-    int idx = 1;
+    int non_abs_idx = 1;
     for (r in 1 : n_states) {
       if (is_absorbing[r] == 1) 
         continue;
-      log_exit_rate[r] = log_exit_rate_prior_mu[r]
+      log_exit_rate[non_abs_idx] = log_exit_rate_prior_mu[r]
                          + log_exit_rate_prior_sigma[r]
-                           * log_exit_rate_raw[idx];
-      exit_rate[r] = exp(log_exit_rate[r]);
-      idx += 1;
+                           * log_exit_rate_raw[non_abs_idx];
+      exit_rate[r] = exp(log_exit_rate[non_abs_idx]);
+      non_abs_idx += 1;
     }
   }
   
