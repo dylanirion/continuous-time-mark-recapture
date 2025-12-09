@@ -32,7 +32,7 @@ real observed_individual_lpdf(array[] real capture_times,
     int s_prev = capture_states[i - 1];
     int s_curr = capture_states[i];
     if (dt < 1e-9) {
-      if (s_prev != s_curr) 
+      if (s_prev != s_curr)
         return negative_infinity();
       continue;
     }
@@ -52,20 +52,24 @@ real observed_individual_lpdf(array[] real capture_times,
         
       real t_step_end = fmin(capture_times[i], t_next_effort);
       real dt_piecewise = t_step_end - t_piecewise;
-      real effort = effort_values[current_effort_idx, s_curr];
+      vector[size(lambda)] effort = to_vector(
+                                              effort_values[current_effort_idx,  : ]);
       P_trans = P_trans
-                * piecewise_prob(Q, lambda * effort, dt_piecewise,
+                * piecewise_prob(Q, lambda .* effort, dt_piecewise,
                                  is_observable);
       t_piecewise = t_step_end;
     }
       
-    if (P_trans[s_prev, s_curr] < 1e-30) 
+    if (P_trans[s_prev, s_curr] < 1e-30)
       return negative_infinity();
-    log_prob += log(P_trans[s_prev, s_curr])
-                + log(
+    log_prob += log(P_trans[s_prev, s_curr]);
+    if (is_observable[s_curr]) {
+      log_prob += log(
                       lambda[s_curr]
-                      * effort_values[find_interval_index(capture_times[i],
-                                        effort_times, current_effort_idx), s_curr]);
+                      * effort_values[find_interval_index(
+                                        capture_times[i], effort_times,
+                                        current_effort_idx), s_curr]);
+    }
   }
     
   // No captures after last event
@@ -85,15 +89,16 @@ real observed_individual_lpdf(array[] real capture_times,
                            ? effort_times[current_effort_idx + 1] : T_end;
       real t_step_end = fmin(T_end, t_next_effort);
       real dt_piecewise = t_step_end - t_piecewise;
-      real effort = effort_values[current_effort_idx, s_last];
+      vector[size(lambda)] effort = to_vector(
+                                              effort_values[current_effort_idx,  : ]);
       P_final = P_final
-                * piecewise_prob(Q, lambda * effort, dt_piecewise,
+                * piecewise_prob(Q, lambda .* effort, dt_piecewise,
                                  is_observable);
       t_piecewise = t_step_end;
     }
       
     real prob_no_detection = sum(P_final[capture_states[n_captures],  : ]);
-    if (prob_no_detection < 1e-30) 
+    if (prob_no_detection < 1e-30)
       return negative_infinity();
     log_prob += log(prob_no_detection);
   }
