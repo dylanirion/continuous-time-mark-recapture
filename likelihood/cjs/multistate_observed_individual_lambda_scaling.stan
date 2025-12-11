@@ -1,6 +1,5 @@
 // log likelihood of an individual capture history
-matrix piecewise_prob(matrix Q, vector lambda, real dt,
-                      array[] int is_observable) {
+matrix make_Q_piecewise(matrix Q, vector lambda, array[] int is_observable) {
   matrix[rows(Q), cols(Q)] Q_piecewise = Q;
     
   // scale detection (lambda)
@@ -13,7 +12,7 @@ matrix piecewise_prob(matrix Q, vector lambda, real dt,
     }
   }
     
-  return matrix_exp(Q_piecewise * dt);
+  return Q_piecewise;
 }
   
 real observed_individual_lpdf(array[] real capture_times,
@@ -26,19 +25,21 @@ real observed_individual_lpdf(array[] real capture_times,
   real log_prob = 0.0;
   int current_effort_idx = 1; // cache to speed up search
     
+  real dt_threshold = 0.1;
+    
   // Subsequent captures
   for (i in 2 : n_captures) {
     real dt = capture_times[i] - capture_times[i - 1];
     int s_prev = capture_states[i - 1];
     int s_curr = capture_states[i];
     if (dt < 1e-9) {
-      if (s_prev != s_curr)
+      if (s_prev != s_curr) 
         return negative_infinity();
       continue;
     }
       
-    matrix[rows(Q), cols(Q)] P_trans = diag_matrix(
-                                                   rep_vector(1.0, rows(Q)));
+    row_vector[rows(Q)] P_trans = rep_row_vector(0.0, rows(Q));
+    P_trans[s_prev] = 1.0;
       
     // piecewise integration
     real t_piecewise = capture_times[i - 1];
@@ -54,30 +55,39 @@ real observed_individual_lpdf(array[] real capture_times,
       real dt_piecewise = t_step_end - t_piecewise;
       vector[size(lambda)] effort = to_vector(
                                               effort_values[current_effort_idx,  : ]);
-      P_trans = P_trans
-                * piecewise_prob(Q, lambda .* effort, dt_piecewise,
-                                 is_observable);
+        
+      matrix[rows(Q), cols(Q)] Q_piecewise = make_Q_piecewise(Q,
+                                                              lambda
+                                                              .* effort,
+                                                              is_observable);
+        
+      if (dt < dt_threshold) {
+        // order 2 taylor series approximation
+        row_vector[rows(Q)] v_Q = P_trans * Q_piecewise;
+        P_trans += v_Q * dt + 0.5 * (v_Q * Q_piecewise) * (dt * dt);
+      } else {
+        P_trans = P_trans * matrix_exp(Q_piecewise * dt);
+      }
       t_piecewise = t_step_end;
     }
       
-    if (P_trans[s_prev, s_curr] < 1e-30)
+    if (P_trans[s_curr] < 1e-30) 
       return negative_infinity();
-    log_prob += log(P_trans[s_prev, s_curr]);
+    log_prob += log(P_trans[s_curr]);
     if (is_observable[s_curr]) {
       log_prob += log(
                       lambda[s_curr]
-                      * effort_values[find_interval_index(
-                                        capture_times[i], effort_times,
-                                        current_effort_idx), s_curr]);
+                      * effort_values[find_interval_index(capture_times[i],
+                                        effort_times, current_effort_idx), s_curr]);
     }
   }
     
   // No captures after last event
   real t_last = capture_times[n_captures];
   int s_last = capture_states[n_captures];
-  if (T_end - t_last > 1e-9) {
-    matrix[rows(Q), cols(Q)] P_final = diag_matrix(
-                                                   rep_vector(1.0, rows(Q)));
+  if (T_end - t_last > 1e-9 && is_observable[s_last]) {
+    row_vector[rows(Q)] P_final = rep_row_vector(0.0, rows(Q));
+    P_final[s_last] = 1.0;
       
     // piecewise integration
     real t_piecewise = t_last;
@@ -91,14 +101,24 @@ real observed_individual_lpdf(array[] real capture_times,
       real dt_piecewise = t_step_end - t_piecewise;
       vector[size(lambda)] effort = to_vector(
                                               effort_values[current_effort_idx,  : ]);
-      P_final = P_final
-                * piecewise_prob(Q, lambda .* effort, dt_piecewise,
-                                 is_observable);
+      matrix[rows(Q), cols(Q)] Q_piecewise = make_Q_piecewise(Q,
+                                                              lambda
+                                                              .* effort,
+                                                              is_observable);
+      if (dt_piecewise < dt_threshold) {
+        // order 2 taylor series approximation
+        row_vector[rows(Q)] v_Q = P_final * Q_piecewise;
+        P_final += v_Q * dt_piecewise
+                   + 0.5 * (v_Q * Q_piecewise)
+                     * (dt_piecewise * dt_piecewise);
+      } else {
+        P_final = P_final * matrix_exp(Q_piecewise * dt_piecewise);
+      }
       t_piecewise = t_step_end;
     }
       
-    real prob_no_detection = sum(P_final[capture_states[n_captures],  : ]);
-    if (prob_no_detection < 1e-30)
+    real prob_no_detection = sum(P_final);
+    if (prob_no_detection < 1e-30) 
       return negative_infinity();
     log_prob += log(prob_no_detection);
   }
