@@ -96,6 +96,18 @@ transformed data {
   */
   
   int n_effective_states = n_states - sum(is_absorbing);
+  array[n_states] int state_to_eff_idx;
+  {
+    int counter = 1;
+    for (r in 1 : n_states) {
+      if (is_absorbing[r] == 1) {
+        state_to_eff_idx[r] = 0; // Placeholder for absorbing states
+      } else {
+        state_to_eff_idx[r] = counter;
+        counter += 1;
+      }
+    }
+  }
 }
 parameters {
   vector[n_effective_states] log_exit_rate_raw;
@@ -123,54 +135,47 @@ transformed parameters {
   }
   
   // event_probs[] indices 1 to (n_states-1) for transitions, and index n_states for detection.
-  array[n_effective_states] simplex[n_states] event_probs;
+  array[n_states] simplex[n_states] event_probs;
+  vector<lower=0>[n_states] lambda = rep_vector(0.0, n_states);
+
   {
     int start_idx = 1;
-    int observable_idx = 1;
     for (r in 1 : n_states) {
-      // absorbing state: no events (will have zero exit rate)
-      //TODO: check is_observable? could we have an absorbing but observable state?
-      if (is_absorbing[r] == 1) 
+      int eff_idx = state_to_eff_idx[r];
+      if (eff_idx == 0) {
+        event_probs[r] = rep_vector(1.0 / n_states, n_states); // Dummy for absorbing
         continue;
-      
-      vector[n_states] full_probs = rep_vector(0.0, n_states);
-      int K = n_free_per_state[r];
-      
-      if (K == 1) {
-        // only one free parameter - deterministic transition
-        full_probs = rep_vector(0.0, n_states);
-      } else {
-        // multiple free parameters - use ILR transform
-        vector[K] state_probs = inv_ilr_simplex_constrain_lp(
-                                  segment(free_logits, start_idx, K - 1));
-        int prob_idx = 1;
-        //NB: explicitly not using c here, because 'columns' of constrain_to_zero do not align directly with states
-        for (j in 1 : n_states) {
-          if (constrain_to_zero[r, j] == 0) {
-            full_probs[j] = state_probs[prob_idx];
-            prob_idx += 1;
-          }
-        }
-        start_idx += (K - 1);
       }
-      event_probs[observable_idx] = full_probs;
-      observable_idx += 1;
+      
+      int K = n_free_per_state[r];
+      vector[K] state_probs = inv_ilr_simplex_constrain_lp(
+                                  segment(free_logits, start_idx, K - 1));
+      
+      vector[n_states] full_row = rep_vector(0.0, n_states);
+      int prob_idx = 1;
+      for (j in 1 : n_states) {
+        if (constrain_to_zero[r, j] == 0) {
+          full_row[j] = state_probs[prob_idx];
+          prob_idx += 1;
+        }
+      }
+      event_probs[r] = full_row;
+      start_idx += (K - 1);
+      
+      if (is_observable[r] == 1) {
+        // event_idx for detection is the last element of the simplex
+        lambda[r] = exit_rate[r] * event_probs[r][n_states]; 
+      }
     }
   }
   
-  // detection rates for states
-  vector<lower=0>[n_effective_states] lambda = rep_vector(0.0,
-                                                          n_effective_states);
   //vector<lower=0>[n_observable_states] mu;
   //Q matrix (without detection leakage)
   matrix[n_states, n_states] Q = rep_matrix(0.0, n_states, n_states);
   
   {
-    int observable_idx = 1;
     for (r in 1 : n_states) {
-      // absorbing state: no transitions out
-      if (is_absorbing[r] == 1) 
-        continue;
+      if (state_to_eff_idx[r] == 0) continue;
       
       // fill off-diagonal elements (transitions to other states)
       int event_idx = 1;
@@ -181,20 +186,13 @@ transformed parameters {
         event_idx += 1;
       }
       
-      if (is_observable[r] == 1) {
-        lambda[observable_idx] = exit_rate[r] * event_probs[r][event_idx];
-        // used to also generate mu here, but maybe we have a model with not absorbing states?
-        observable_idx += 1;
-      }
-      
-      // diagonal: negative sum of row (including detection)
-      real row_sum = sum(Q[r,  : ]);
-      Q[r, r] = -row_sum;
+      // diagonal: negative sum of row
+      Q[r, r] = -sum(Q[r,  : ]);
     }
   }
   
   // lambda scaling
-  array[n_effort_intervals, n_effective_states] real effort_complete;
+  array[n_effort_intervals, n_states] real effort_complete = rep_array(0.0, n_effort_intervals, n_states);
   {
     int absorbing_idx = 1;
     for (i in 1 : n_states) {
