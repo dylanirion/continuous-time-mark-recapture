@@ -1,14 +1,11 @@
 // log likelihood of an individual capture history
 matrix make_Q_piecewise(matrix Q, vector lambda, array[] int is_observable) {
   matrix[rows(Q), cols(Q)] Q_piecewise = Q;
-    
-  // scale detection (lambda)
-  int observable_idx = 1;
+
   for (r in 1 : rows(Q)) {
     if (is_observable[r]) {
       // subtract the detection rate from the Q diagonal (leakage).
       Q_piecewise[r, r] -= lambda[r];
-      observable_idx += 1;
     }
   }
     
@@ -64,9 +61,9 @@ real observed_individual_lpdf(array[] real capture_times,
       if (dt < dt_threshold) {
         // order 2 taylor series approximation
         row_vector[rows(Q)] v_Q = P_trans * Q_piecewise;
-        P_trans += v_Q * dt + 0.5 * (v_Q * Q_piecewise) * (dt * dt);
+        P_trans += v_Q * dt_piecewise + 0.5 * (v_Q * Q_piecewise) * (dt_piecewise * dt_piecewise);
       } else {
-        P_trans = P_trans * matrix_exp(Q_piecewise * dt);
+        P_trans = P_trans * matrix_exp(Q_piecewise * dt_piecewise);
       }
       t_piecewise = t_step_end;
     }
